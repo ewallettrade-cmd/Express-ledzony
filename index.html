@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DHL Express - Śledzenie Przesyłek i Doręczeń</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Firebase Compat SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        .dhl-yellow { background-color: #FFCC00; }
+        .dhl-red { background-color: #D40511; }
+        .text-dhl-red { color: #D40511; }
+        .border-dhl-red { border-color: #D40511; }
+        .hover-dhl-red:hover { background-color: #b0030d; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans min-h-screen flex flex-col text-gray-800">
+
+    <!-- Nagłówek DHL -->
+    <header class="bg-white border-b-4 border-dhl-red shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="switchView('user')">
+                <div class="dhl-yellow text-dhl-red font-black text-3xl italic px-4 py-1.5 rounded shadow-sm tracking-tighter border border-yellow-400">
+                    DHL <span class="text-xs tracking-normal uppercase not-italic font-bold block text-gray-900 -mt-2">EXPRESS</span>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-3">
+                <button id="navUserBtn" onclick="switchView('user')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-100 text-gray-700 hover:bg-gray-200 transition">
+                    <i class="fa-solid fa-box mr-1"></i> Śledzenie Przesyłki
+                </button>
+                <button id="navPaulBtn" onclick="switchView('login')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-dhl-red text-white hover-dhl-red transition">
+                    <i class="fa-solid fa-user-shield mr-1"></i> Paul (Admin)
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- ==================== LOGOWANIE PAUL ==================== -->
+        <div id="loginView" class="hidden max-w-md mx-auto mt-12 bg-white p-8 rounded-2xl border border-gray-200 shadow-lg space-y-6">
+            <div class="text-center space-y-2">
+                <div class="dhl-yellow text-dhl-red w-14 h-14 rounded-full flex items-center justify-center mx-auto text-2xl font-black shadow-inner">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <h2 class="text-xl font-black text-gray-900">Panel Administratora (Paul)</h2>
+                <p class="text-xs text-gray-500">Wprowadź hasło, aby zarządzać przesyłkami.</p>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Hasło dostępu</label>
+                    <input type="password" id="paulPasswordInput" placeholder="Wpisz hasło..." class="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm focus:border-dhl-red outline-none">
+                </div>
+                <button onclick="verifyPaulPassword()" class="w-full dhl-red hover-dhl-red text-white font-black uppercase py-3.5 rounded-xl shadow transition">
+                    Zaloguj się
+                </button>
+                <button onclick="switchView('user')" class="w-full text-gray-500 hover:text-gray-700 text-xs font-semibold py-2">
+                    Powrót do strony głównej
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== PANEL ADMINA (PAUL) ==================== -->
+        <div id="paulView" class="hidden space-y-8">
+            <div class="flex items-center justify-between bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <div>
+                    <h1 class="text-2xl font-black text-gray-900">Panel Zarządzania - Paul</h1>
+                    <p class="text-xs text-gray-500">Dodawaj nowe paczki lub kliknij „Edytuj”, aby dodać kolejne etapy w kolejnych dniach.</p>
+                </div>
+                <button onclick="switchView('user')" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition">
+                    Wyloguj
+                </button>
+            </div>
+
+            <!-- Formularz Dodawania / Edycji -->
+            <div class="bg-white p-6 sm:p-8 rounded-2xl border border-gray-200 shadow-sm space-y-6">
+                <div class="flex items-center justify-between border-b pb-3">
+                    <h2 class="font-bold text-gray-900 text-base flex items-center">
+                        <i class="fa-solid fa-truck-ramp-box text-dhl-red mr-2"></i> <span id="formModeTitle">Nowa Przesyłka / Edycja</span>
+                    </h2>
+                    <button type="button" onclick="resetForm()" class="text-xs text-gray-400 hover:text-gray-600 font-bold">Wyczyść formularz</button>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Numer przesyłki (10 cyfr) *</label>
+                        <input type="text" id="newTrackingNumber" maxlength="10" placeholder="np. 1234567890" class="w-full rounded-xl border border-gray-300 p-3 text-sm font-mono font-bold outline-none focus:border-dhl-red">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Nadanie (Skąd)</label>
+                        <input type="text" id="newOrigin" placeholder="np. Warszawa, Polska" class="w-full rounded-xl border border-gray-300 p-3 text-sm outline-none focus:border-dhl-red">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Przeznaczenie (Dokąd)</label>
+                        <input type="text" id="newDestination" placeholder="np. Paryż, Francja" class="w-full rounded-xl border border-gray-300 p-3 text-sm outline-none focus:border-dhl-red">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Szacowana data doręczenia</label>
+                        <input type="text" id="newDeliveryDate" placeholder="np. Dzisiaj przed 18:00" class="w-full rounded-xl border border-gray-300 p-3 text-sm outline-none focus:border-dhl-red">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Status główny</label>
+                        <select id="newStatusType" class="w-full rounded-xl border border-gray-300 p-3 text-sm bg-white outline-none focus:border-dhl-red font-semibold">
+                            <option value="in_transit">W doręczeniu (Czerwony)</option>
+                            <option value="delivered">Doręczona pomyślnie (Zielony)</option>
+                            <option value="pending">Oczekiwanie / Wstrzymana (Pomarańczowy)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Opis statusu</label>
+                        <input type="text" id="newStatusTitle" placeholder="np. Przesyłka w drodze" class="w-full rounded-xl border border-gray-300 p-3 text-sm outline-none focus:border-dhl-red">
+                    </div>
+                </div>
+
+                <!-- Etapów historii (Można dodać Etap 1, Etap 2...) -->
+                <div class="border-t pt-6 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="font-bold text-gray-900 text-sm flex items-center">
+                            <i class="fa-solid fa-list-check text-dhl-red mr-2"></i> Historia doręczenia (Etap 1, Etap 2...)
+                        </h3>
+                        <button type="button" onclick="addHistoryField()" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-bold flex items-center space-x-1">
+                            <i class="fa-solid fa-plus text-dhl-red"></i>
+                            <span>Dodaj kolejny etap</span>
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500">Najnowszy etap umieść na górze.</p>
+
+                    <div id="historyFieldsContainer" class="space-y-3">
+                        <!-- Pola dynamiczne -->
+                    </div>
+                </div>
+
+                <button onclick="savePackage()" class="w-full dhl-red hover-dhl-red text-white font-black uppercase py-4 rounded-xl shadow-lg transition text-base">
+                    <i class="fa-solid fa-floppy-disk mr-2"></i> Zapisz przesyłkę w bazie globalnej
+                </button>
+            </div>
+
+            <!-- Lista paczek z przyciskiem Edycji -->
+            <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+                <h2 class="font-bold text-gray-900 text-base">Skonfigurowane przesyłki (Kliknij "Edytuj", aby zmodyfikować lub dodać etapy)</h2>
+                <div id="paulPackagesList" class="space-y-3">
+                    <!-- Lista paczek -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== VUE UTILISATEUR (ŚLEDZENIE) ==================== -->
+        <div id="userView" class="space-y-8">
+            <div class="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
+                <div class="dhl-yellow p-6 sm:p-8 text-gray-900 border-b border-yellow-400">
+                    <h1 class="text-2xl sm:text-3xl font-black uppercase tracking-tight text-gray-900 flex items-center">
+                        <i class="fa-solid fa-box-archive mr-3 text-dhl-red"></i> Sprawdź status przesyłki
+                    </h1>
+                    <p class="text-sm font-medium text-gray-800 mt-1">
+                        Wpisz swój 10-cyfrowy numer przesyłki, aby zobaczyć aktualną historię doręczenia.
+                    </p>
+                </div>
+
+                <div class="p-6 sm:p-8 space-y-6">
+                    <div class="space-y-2">
+                        <label class="block text-xs font-bold uppercase tracking-wider text-gray-600">Numer przesyłki *</label>
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <input type="text" id="trackingInput" maxlength="10" placeholder="np. 1234567890" class="w-full text-xl font-mono font-bold tracking-widest rounded-xl border-2 border-gray-300 p-4 focus:border-dhl-red outline-none transition uppercase">
+                            <button onclick="trackPackage()" class="dhl-red hover-dhl-red text-white font-black uppercase px-8 py-4 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-base">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <span>Szukaj</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wynik wyszukiwania -->
+            <div id="resultCard" class="hidden bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden">
+                <div id="statusBanner" class="p-6 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <span class="text-xs uppercase font-bold tracking-wider opacity-80 block">Aktualny status</span>
+                        <h2 class="text-xl sm:text-2xl font-black uppercase tracking-tight flex items-center" id="statusTitle">--</h2>
+                    </div>
+                    <div class="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg text-right">
+                        <span class="text-xs uppercase font-bold block opacity-80">Przewidywane doręczenie</span>
+                        <span class="text-lg font-black" id="deliveryDate">--</span>
+                    </div>
+                </div>
+
+                <div class="p-6 border-b border-gray-100 bg-gray-50/50 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                    <div>
+                        <span class="text-gray-400 font-bold block uppercase">Numer przesyłki</span>
+                        <span class="text-sm font-mono font-bold text-gray-900" id="resWaybill">--</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-400 font-bold block uppercase">Nadanie</span>
+                        <span class="text-sm font-bold text-gray-900" id="resOrigin">--</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-400 font-bold block uppercase">Przeznaczenie</span>
+                        <span class="text-sm font-bold text-gray-900" id="resDestination">--</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-400 font-bold block uppercase">Usługa</span>
+                        <span class="text-sm font-bold text-gray-900">DHL Express Worldwide</span>
+                    </div>
+                </div>
+
+                <!-- Historia w języku polskim -->
+                <div class="p-6 sm:p-8 space-y-6">
+                    <h3 class="text-sm font-black uppercase tracking-wider text-gray-800 flex items-center">
+                        <i class="fa-solid fa-rotate-left mr-2 text-dhl-red"></i> HISTORIA DORĘCZENIA
+                    </h3>
+
+                    <div class="relative pl-6 border-l-2 border-gray-200 space-y-8" id="timelineList">
+                        <!-- Generowane dynamicznie -->
+                    </div>
+                </div>
+
+                <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                    <button onclick="window.print()" class="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-xl text-xs font-bold flex items-center space-x-2 transition">
+                        <i class="fa-solid fa-print"></i>
+                        <span>Drukuj potwierdzenie</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="bg-gray-900 text-gray-400 text-xs py-8 border-t-4 border-dhl-red mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left sm:flex sm:justify-between sm:items-center space-y-4 sm:space-y-0">
+            <div>
+                <p class="font-bold text-gray-200">DHL International GmbH</p>
+                <p>&copy; 2026 Wszelkie prawa zastrzeżone. Oficjalny system śledzenia.</p>
+            </div>
+            <div class="flex justify-center space-x-6 text-gray-400 font-medium">
+                <a href="#" class="hover:text-white">Prywatność</a>
+                <a href="#" class="hover:text-white">Regulamin</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Logika JavaScript -->
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCSG3ml2zdJinnr-9V27cVzGtajGGZDINY",
+            authDomain: "verifpl-2e6c6.firebaseapp.com",
+            projectId: "verifpl-2e6c6",
+            storageBucket: "verifpl-2e6c6.firebasestorage.app",
+            messagingSenderId: "954364676551",
+            appId: "1:954364676551:web:26585d08b4530c821af1e2"
+        };
+
+        let db = null;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        } catch(e) {}
+
+        let packagesDB = {};
+
+        if (db) {
+            db.collection("dhl_packages").onSnapshot((snapshot) => {
+                packagesDB = {};
+                snapshot.forEach((doc) => {
+                    packagesDB[doc.id] = doc.data();
+                });
+                renderPaulPackagesList();
+            }, () => {});
+        }
+
+        function switchView(view) {
+            document.getElementById('userView').classList.add('hidden');
+            document.getElementById('paulView').classList.add('hidden');
+            document.getElementById('loginView').classList.add('hidden');
+
+            if (view === 'user') {
+                document.getElementById('userView').classList.remove('hidden');
+            } else if (view === 'login') {
+                document.getElementById('loginView').classList.remove('hidden');
+                document.getElementById('paulPasswordInput').value = '';
+            } else if (view === 'paul') {
+                document.getElementById('paulView').classList.remove('hidden');
+                renderPaulPackagesList();
+                if (document.getElementById('historyFieldsContainer').children.length === 0) {
+                    addHistoryField("Dzisiaj - 08:30", "Centrum dystrybucyjne, Warszawa", "Przesyłka przekazana kurierowi do doręczenia.");
+                }
+            }
+        }
+
+        function verifyPaulPassword() {
+            const pwd = document.getElementById('paulPasswordInput').value;
+            if (pwd === "Paul") {
+                switchView('paul');
+            } else {
+                alert("Nieprawidłowe hasło!");
+            }
+        }
+
+        function addHistoryField(time = '', location = '', desc = '') {
+            const container = document.getElementById('historyFieldsContainer');
+            const fieldId = Date.now() + Math.random();
+            
+            const html = `
+                <div id="field-${fieldId}" class="p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2 relative">
+                    <button type="button" onclick="removeHistoryField('field-${fieldId}')" class="absolute top-2 right-2 text-dhl-red hover:text-red-700 text-xs font-bold">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input type="text" placeholder="Data/Godzina (np. Dzisiaj - 09:00)" value="${time}" class="history-time w-full rounded-lg border border-gray-300 p-2 text-xs outline-none focus:border-dhl-red">
+                        <input type="text" placeholder="Lokalizacja (np. Warszawa)" value="${location}" class="history-location w-full rounded-lg border border-gray-300 p-2 text-xs outline-none focus:border-dhl-red">
+                    </div>
+                    <input type="text" placeholder="Opis etapu (np. Doręczono pomyślnie)" value="${desc}" class="history-desc w-full rounded-lg border border-gray-300 p-2 text-xs outline-none focus:border-dhl-red">
+                </div>`;
+            container.insertAdjacentHTML('beforeend', html);
+        }
+
+        function removeHistoryField(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        function resetForm() {
+            document.getElementById('newTrackingNumber').value = '';
+            document.getElementById('newOrigin').value = '';
+            document.getElementById('newDestination').value = '';
+            document.getElementById('newDeliveryDate').value = '';
+            document.getElementById('newStatusTitle').value = '';
+            document.getElementById('historyFieldsContainer').innerHTML = '';
+            document.getElementById('formModeTitle').innerText = "Nowa Przesyłka";
+            addHistoryField();
+        }
+
+        // Fonction pour éditer un colis existant et lui rajouter des étapes en direct
+        function editPackage(num) {
+            const pkg = packagesDB[num];
+            if (!pkg) return;
+
+            document.getElementById('newTrackingNumber').value = num;
+            document.getElementById('newOrigin').value = pkg.origin || '';
+            document.getElementById('newDestination').value = pkg.destination || '';
+            document.getElementById('newDeliveryDate').value = pkg.estimatedDelivery || '';
+            document.getElementById('newStatusType').value = pkg.statusType || 'in_transit';
+            document.getElementById('newStatusTitle').value = pkg.statusTitle || '';
+            document.getElementById('formModeTitle').innerText = "Edycja przesyłki: " + num;
+
+            // Remplir l'historique existant pour pouvoir le modifier ou rajouter un Étape 2, etc.
+            const container = document.getElementById('historyFieldsContainer');
+            container.innerHTML = '';
+            if (pkg.history && pkg.history.length > 0) {
+                pkg.history.forEach(h => {
+                    addHistoryField(h.time, h.location, h.desc);
+                });
+            } else {
+                addHistoryField();
+            }
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function savePackage() {
+            const num = document.getElementById('newTrackingNumber').value.trim();
+            const origin = document.getElementById('newOrigin').value.trim();
+            const dest = document.getElementById('newDestination').value.trim();
+            const date = document.getElementById('newDeliveryDate').value.trim();
+            const type = document.getElementById('newStatusType').value;
+            const title = document.getElementById('newStatusTitle').value.trim();
+
+            if (!num || num.length < 5) {
+                alert("Podaj prawidłowy numer przesyłki.");
+                return;
+            }
+
+            const timeInputs = document.querySelectorAll('.history-time');
+            const locationInputs = document.querySelectorAll('.history-location');
+            const descInputs = document.querySelectorAll('.history-desc');
+
+            let history = [];
+            for (let i = 0; i < timeInputs.length; i++) {
+                if (timeInputs[i].value.trim() || descInputs[i].value.trim()) {
+                    history.push({
+                        time: timeInputs[i].value.trim() || "Dzisiaj",
+                        location: locationInputs[i].value.trim() || "Oddział DHL",
+                        desc: descInputs[i].value.trim() || "Aktualizacja statusu."
+                    });
+                }
+            }
+
+            const packageObj = {
+                statusTitle: title || "W doręczeniu",
+                statusType: type,
+                estimatedDelivery: date || "Wkrótce",
+                origin: origin || "Warszawa, Polska",
+                destination: dest || "Paryż, Francja",
+                history: history
+            };
+
+            if (db) {
+                try {
+                    await db.collection("dhl_packages").doc(num).set(packageObj);
+                    alert("Przesyłka " + num + " została pomyślnie zaktualizowana w chmurze!");
+                    resetForm();
+                } catch(e) {
+                    alert("Błąd zapisu: " + e.message);
+                }
+            }
+        }
+
+        async function deletePackage(num) {
+            if (confirm("Czy na pewno chcesz usunąć przesyłkę " + num + "?")) {
+                if (db) {
+                    try { await db.collection("dhl_packages").doc(num).delete(); } catch(e){}
+                }
+            }
+        }
+
+        function renderPaulPackagesList() {
+            const container = document.getElementById('paulPackagesList');
+            container.innerHTML = '';
+            const keys = Object.keys(packagesDB);
+
+            if (keys.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-400">Brak skonfigurowanych przesyłek.</p>';
+                return;
+            }
+
+            keys.forEach(num => {
+                const pkg = packagesDB[num];
+                container.innerHTML += `
+                    <div class="flex items-center justify-between bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs">
+                        <div>
+                            <span class="font-mono font-bold text-gray-900 text-sm">${num}</span>
+                            <span class="text-gray-500 ml-2">(${pkg.origin} → ${pkg.destination})</span>
+                            <div class="text-gray-700 font-semibold mt-1">
+                                <span class="text-dhl-red">Status:</span> ${pkg.statusTitle} | ${pkg.history ? pkg.history.length : 0} etapy(-ów)
+                            </div>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="editPackage('${num}')" class="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 font-bold rounded-lg transition text-gray-800">Edytuj / Dodaj etap</button>
+                            <button onclick="deletePackage('${num}')" class="px-3 py-1.5 text-dhl-red hover:bg-red-50 font-bold rounded-lg transition">Usuń</button>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        function trackPackage() {
+            const input = document.getElementById('trackingInput').value.trim();
+            const resultCard = document.getElementById('resultCard');
+            const statusBanner = document.getElementById('statusBanner');
+
+            if (!input) {
+                alert("Wpisz numer przesyłki.");
+                return;
+            }
+
+            const data = packagesDB[input];
+
+            if (data) {
+                document.getElementById('resWaybill').innerText = input;
+                document.getElementById('resOrigin').innerText = data.origin;
+                document.getElementById('resDestination').innerText = data.destination;
+                document.getElementById('deliveryDate').innerText = data.estimatedDelivery;
+                document.getElementById('statusTitle').innerText = data.statusTitle;
+
+                if (data.statusType === 'delivered') {
+                    statusBanner.className = "p-6 bg-emerald-600 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4";
+                } else if (data.statusType === 'in_transit') {
+                    statusBanner.className = "p-6 dhl-red text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4";
+                } else {
+                    statusBanner.className = "p-6 bg-amber-500 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4";
+                }
+
+                const timelineList = document.getElementById('timelineList');
+                timelineList.innerHTML = '';
+
+                if (data.history && data.history.length > 0) {
+                    data.history.forEach((step, index) => {
+                        const isFirst = index === 0;
+                        timelineList.innerHTML += `
+                            <div class="relative">
+                                <div class="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full ${isFirst ? 'bg-dhl-red ring-4 ring-red-100' : 'bg-gray-300'} border-2 border-white"></div>
+                                <div class="space-y-1">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <span class="text-xs font-bold ${isFirst ? 'text-dhl-red' : 'text-gray-500'}">${step.time}</span>
+                                        <span class="text-[11px] bg-gray-100 text-gray-700 px-2 py-0.5 rounded font-bold">${step.location}</span>
+                                    </div>
+                                    <p class="text-sm font-bold text-gray-900">${step.desc}</p>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+
+                resultCard.classList.remove('hidden');
+            } else {
+                alert("Nie znaleziono przesyłki o numerze: " + input);
+                resultCard.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
